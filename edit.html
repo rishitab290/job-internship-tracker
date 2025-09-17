@@ -1,0 +1,134 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8"/>
+    <meta name="viewport" content="width=device-width,initial-scale=1"/>
+    <title>Company Edit — Update Application Status</title>
+    <style>
+    body{font-family:Arial,Helvetica,sans-serif;background:#f9fafb;margin:20px}
+    .box{max-width:640px;margin:0 auto;background:white;padding:16px;border-radius:6px;border:1px solid #ddd}
+    input,select,textarea,button{width:100%;padding:8px;margin-top:8px;box-sizing:border-box}
+    .btn{padding:10px;border-radius:6px;border:none;cursor:pointer;background:#2b7cff;color:white}
+    .small{font-size:0.9em;color:#666}
+  </style>
+</head>
+<body>
+<div class="box">
+    <h2>Update Application Status</h2>
+    <p id="statusMsg" class="small">Loading — verifying token...</p>
+
+    <div id="editFormWrap" style="display:none">
+        <p><strong>Applicant:</strong> <span id="applicantEmail"></span></p>
+        <p><strong>Company / Position:</strong> <span id="companyPosition"></span></p>
+
+        <label>Status</label>
+        <select id="newStatus">
+            <option>Applied</option>
+            <option>Interviewing</option>
+            <option>Offer</option>
+            <option>Rejected</option>
+        </select>
+
+        <label>Notes from company (optional)</label>
+        <textarea id="companyNotes" rows="4" placeholder="e.g. Interview scheduled for ..."></textarea>
+
+        <button id="submitUpdate" class="btn">Submit Update</button>
+        <p class="small">This will update the applicant's job entry in real time.</p>
+    </div>
+</div>
+
+<script type="module">
+  import { initializeApp } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-app.js";
+  import { getDatabase, ref, get, update } from "https://www.gstatic.com/firebasejs/12.2.1/firebase-database.js";
+
+  const firebaseConfig = {
+    apiKey: "AIzaSyBSUy5xyp9JQ77cPnoJ7L_Ydh9-Kc0l1N8",
+    authDomain: "job-internship-tracker.firebaseapp.com",
+    databaseURL: "https://job-internship-tracker-default-rtdb.firebaseio.com",
+    projectId: "job-internship-tracker",
+    storageBucket: "job-internship-tracker.firebasestorage.app",
+    messagingSenderId: "346187501673",
+    appId: "1:346187501673:web:bb3d0a8fe36f92b56b92f8",
+  };
+
+  const app = initializeApp(firebaseConfig);
+  const db = getDatabase(app);
+
+  // UI
+  const statusMsg = document.getElementById('statusMsg');
+  const editFormWrap = document.getElementById('editFormWrap');
+  const applicantEmail = document.getElementById('applicantEmail');
+  const companyPosition = document.getElementById('companyPosition');
+  const newStatus = document.getElementById('newStatus');
+  const companyNotes = document.getElementById('companyNotes');
+  const submitBtn = document.getElementById('submitUpdate');
+
+  // get token from query string
+  const params = new URLSearchParams(location.search);
+  const token = params.get('token');
+  if (!token) {
+    statusMsg.textContent = 'Missing token. Please check the link.';
+    throw new Error('No token provided.');
+  }
+
+  // verify token -> get uid & jobId
+  (async function verify(){
+    try {
+      const tokSnap = await get(ref(db, 'editTokens/' + token));
+      if (!tokSnap.exists()) {
+        statusMsg.textContent = 'Invalid or expired token.';
+        return;
+      }
+      const tok = tokSnap.val();
+      const uid = tok.uid;
+      const jobId = tok.jobId;
+
+      // load job
+      const jobSnap = await get(ref(db, 'jobs/' + uid + '/' + jobId));
+      if (!jobSnap.exists()) {
+        statusMsg.textContent = 'Job not found (it may have been deleted).';
+        return;
+      }
+      const job = jobSnap.val();
+
+      // show form
+      statusMsg.style.display = 'none';
+      editFormWrap.style.display = 'block';
+      applicantEmail.textContent = (job.email || '—'); // note: if you saved applicant email in job
+      companyPosition.textContent = `${job.company} — ${job.position}`;
+
+      // prefill status
+      newStatus.value = job.status || 'Applied';
+
+      // submit update
+      submitBtn.addEventListener('click', async () => {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Updating...';
+        try {
+          await update(ref(db, 'jobs/' + uid + '/' + jobId), {
+            status: newStatus.value,
+            // append or replace notes — here we append company notes to notes field
+            notes: (job.notes ? job.notes + '\n\n' : '') + '[Company update] ' + (companyNotes.value || ''),
+            lastCompanyUpdateAt: Date.now()
+          });
+          statusMsg.style.display = 'block';
+          statusMsg.textContent = 'Update successful — applicant will see the change.';
+          // optionally: invalidate token to make it single-use:
+          // await remove(ref(db, 'editTokens/' + token));
+        } catch (err) {
+          console.error(err);
+          statusMsg.textContent = 'Failed to update: ' + err.message;
+        } finally {
+          submitBtn.disabled = false;
+          submitBtn.textContent = 'Submit Update';
+        }
+      });
+
+    } catch (err) {
+      console.error(err);
+      statusMsg.textContent = 'Verification failed: ' + err.message;
+    }
+  })();
+</script>
+</body>
+</html>
